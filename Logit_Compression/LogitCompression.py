@@ -6,36 +6,20 @@ from scipy.optimize import curve_fit
 
 device='cuda' if torch.cuda.is_available() else 'cpu'
 
+I_base=torch.FloatTensor(np.linspace(0.001,0.999,16)).to(device)
+
 #Decoupage 192
 
-def Decoupage192(Im1):
-    List_Image_Blocs = list()
-    H=Im1.shape[0]
-    if (H<=192):
-      List_Image_Blocs.append(Im1)
-    else:
-      for i in range(H//192+1):
-        if (i==H//192+1): #si dernier
-          Im_Bloc1 = Im1[i*192:]
-          if (len(Im_Bloc2!=0)):
-            List_Image_Blocs.append(Im_Bloc1)
-        else:
-          Im_Bloc2 = Im1[i*192:(i+1)*192]
-          if (len(Im_Bloc2!=0)):
-            List_Image_Blocs.append(Im_Bloc2)
-    return (List_Image_Blocs)
+def Decoupage192(Tensor1):
+  return(torch.split(Tensor1, 192))
 
 # Quantification avec la liste Normal Float
 
 def NF4(L_Weights, L_Approx):
-  
-  new_L=[]
-  for i in (L_Weights):
-    L_provisoire=[]
-    for j in L_Approx:
-      L_provisoire.append(abs(i-j))
-    new_L.append(L_provisoire.index(min(L_provisoire)))
-  return(new_L)
+  L_expand=L_Weights.expand(16,192).to(device)
+  bloc0_transp=torch.transpose(L_expand, 0, 1)
+  L_Weights=torch.argmin(torch.abs(torch.sub(bloc0_transp,I_base)),dim=1)
+  return(L_Weights)
 
 # Fonction logit
 
@@ -47,17 +31,14 @@ def funct(p , a: float, b:float, c:float):
 def Compression(L):
     Bloc_params=[]
     Weight_compressed=[]
-    I_base=np.linspace(0.001,0.999,16)
-
-
     for i in tqdm(range(len(L))):
       W=L[i]
       Bloc_i=Decoupage192(W)
       New_bloc=[]
-      for j,bloc in tqdm(enumerate(Bloc_i)): 
+      for j,bloc in enumerate(Bloc_i): 
 
       # On trie par ordre croissant
-        bloc_sort= bloc.sort().values.tolist()
+        bloc_sort= bloc.sort().values.tolist().cpu()
         x_data=np.linspace(0.001,0.999,len(bloc_sort))
         popt, pcov = curve_fit(funct, x_data, bloc_sort)
 
@@ -65,9 +46,10 @@ def Compression(L):
 
       #   # On approxime chaque valeur du bloc de poids a la plus proche de logit(NF4)
 
-        Logit_NF4=funct(torch.FloatTensor(np.array(I_base)), *popt)
+        Logit_NF4=funct(I_base, *popt).to(device)
+        bloc.to(device)
 
-        New_bloc.append(NF4(torch.FloatTensor([value for value in bloc]), torch.FloatTensor(Logit_NF4)))
+        New_bloc.append(NF4(bloc, Logit_NF4))
 
         Weight_compressed.append(New_bloc)
 
